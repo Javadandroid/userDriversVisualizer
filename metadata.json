@@ -1,0 +1,7 @@
+{
+  "name": "PinMap AI",
+  "description": "An interactive map application using OpenStreetMap. Features customizable pins, distance measurement tools, and AI-powered location search.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
