@@ -36,17 +36,19 @@ export interface AIResponse {
   description: string;
 }
 
-export interface CellTowerMarker {
-  id: number;
-  radio_type: string;
-  mcc: number;
-  mnc: number;
-  lac: number | null;
-  cell_id: number | null;
-  pci: number | null;
-  earfcn: number | null;
+export interface TrackedPoint {
+  id: string;
   lat: number;
-  lon: number;
-  tx_power: number | null;
-  source: string;
+  lng: number;
+}
+
+export interface MatchPair {
+  driver: string;
+  user: string;
+}
+
+export interface MatchSnapshotResponse {
+  drivers: TrackedPoint[];
+  users: TrackedPoint[];
+  matchs: MatchPair[];
 }

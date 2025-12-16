@@ -1,10 +1,10 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './components/MapView';
-import { Pin, PinShape, RulerState, MapCircle, LatLng, CellTowerMarker } from './types';
+import { Pin, PinShape, RulerState, MapCircle, LatLng, MatchPair, TrackedPoint } from './types';
 import { MapPin, Ruler, Trash2, Plus, Sparkles, Navigation, X, Circle as CircleIcon } from 'lucide-react';
 import { findLocationWithAI } from './services/geminiService';
 import { MapIcon } from './components/MapIcons';
-import { fetchTowersByBounds, type BoundingBox } from './services/towerService';
+import { fetchMatchSnapshot, generateMockSnapshot } from './services/matchSnapshotService';
 
 // Helper to calculate distance
 const calculateDistance = (p1: { lat: number; lng: number }, p2: { lat: number; lng: number }) => {
@@ -62,9 +62,24 @@ const App: React.FC = () => {
     const [isAiLoading, setIsAiLoading] = useState(false);
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [mapCenter, setMapCenter] = useState<{lat: number, lng: number} | undefined>(undefined);
-    const [towers, setTowers] = useState<CellTowerMarker[]>([]);
-    const [isLoadingTowers, setIsLoadingTowers] = useState(false);
-    const fetchTimeoutRef = useRef<number | null>(null);
+
+    // Live match snapshot state
+    const [drivers, setDrivers] = useState<TrackedPoint[]>([]);
+    const [users, setUsers] = useState<TrackedPoint[]>([]);
+    const [matchs, setMatchs] = useState<MatchPair[]>([]);
+    const [snapshotEndpoint, setSnapshotEndpoint] = useState<string>(
+        import.meta.env.VITE_MATCH_SNAPSHOT_URL ?? 'http://localhost:8000/api/snapshot/'
+    );
+    const [autoRefresh, setAutoRefresh] = useState(false);
+    const [refreshIntervalSec, setRefreshIntervalSec] = useState(5);
+    const [useMockData, setUseMockData] = useState(true);
+    const [mockDriversCount, setMockDriversCount] = useState(30);
+    const [mockUsersCount, setMockUsersCount] = useState(80);
+    const [mockMatchesCount, setMockMatchesCount] = useState(25);
+    const [showEntityTooltips, setShowEntityTooltips] = useState(true);
+    const [snapshotError, setSnapshotError] = useState<string | null>(null);
+    const [isLoadingSnapshot, setIsLoadingSnapshot] = useState(false);
+    const refreshAbortRef = useRef<AbortController | null>(null);
 
     // -- Handlers --
 
@@ -223,22 +238,52 @@ const App: React.FC = () => {
         return `${Math.round(rulerState.distance)} متر`;
     }, [rulerState.distance]);
 
-    const handleBoundsChange = (bounds: BoundingBox, _zoom: number) => {
-        if (fetchTimeoutRef.current) {
-            window.clearTimeout(fetchTimeoutRef.current);
-        }
-        fetchTimeoutRef.current = window.setTimeout(async () => {
-            setIsLoadingTowers(true);
-            try {
-                const data = await fetchTowersByBounds(bounds, 50);
-                setTowers(data);
-            } catch (error) {
-                console.error('Failed to fetch towers', error);
-            } finally {
-                setIsLoadingTowers(false);
-            }
-        }, 400);
+    const clearSnapshot = () => {
+        setDrivers([]);
+        setUsers([]);
+        setMatchs([]);
     };
+
+    const refreshSnapshot = async () => {
+        refreshAbortRef.current?.abort();
+        const controller = new AbortController();
+        refreshAbortRef.current = controller;
+        setSnapshotError(null);
+        setIsLoadingSnapshot(true);
+        try {
+            const data = useMockData
+                ? generateMockSnapshot({
+                    driversCount: mockDriversCount,
+                    usersCount: mockUsersCount,
+                    matchesCount: mockMatchesCount,
+                })
+                : await fetchMatchSnapshot({ endpoint: snapshotEndpoint }, controller.signal);
+
+            setDrivers(data.drivers);
+            setUsers(data.users);
+            setMatchs(data.matchs);
+        } catch (e: any) {
+            clearSnapshot();
+            setSnapshotError(e?.message || 'Failed to fetch snapshot');
+        } finally {
+            setIsLoadingSnapshot(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!autoRefresh) return;
+        const intervalMs = Math.max(1, refreshIntervalSec) * 1000;
+        const t = window.setInterval(() => {
+            refreshSnapshot();
+        }, intervalMs);
+        return () => window.clearInterval(t);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [autoRefresh, refreshIntervalSec, snapshotEndpoint, useMockData, mockDriversCount, mockUsersCount, mockMatchesCount]);
+
+    const lastMatch = useMemo(() => {
+        if (matchs.length === 0) return null;
+        return matchs[matchs.length - 1];
+    }, [matchs]);
 
     return (
         <div className="flex h-screen w-full relative">
@@ -260,6 +305,125 @@ const App: React.FC = () => {
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4 space-y-6">
+
+                    {/* Match Snapshot Section */}
+                    <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3" dir="rtl">
+                        <div className="flex items-center justify-between">
+                            <h2 className="font-bold text-slate-700">مانیتور مچ (تست)</h2>
+                            <button
+                                onClick={refreshSnapshot}
+                                className="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 disabled:opacity-50"
+                                disabled={isLoadingSnapshot}
+                            >
+                                {isLoadingSnapshot ? 'در حال دریافت...' : 'دریافت Snapshot'}
+                            </button>
+                        </div>
+
+                        <label className="text-xs text-gray-500 block">
+                            Endpoint
+                            <input
+                                type="text"
+                                value={snapshotEndpoint}
+                                onChange={(e) => setSnapshotEndpoint(e.target.value)}
+                                className="w-full mt-1 p-2 border rounded text-sm bg-white dir-ltr"
+                                placeholder="http://localhost:8000/api/snapshot/"
+                            />
+                        </label>
+
+                        <div className="flex items-center justify-between gap-3">
+                            <label className="flex items-center gap-2 text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={autoRefresh}
+                                    onChange={(e) => setAutoRefresh(e.target.checked)}
+                                />
+                                Auto refresh
+                            </label>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs text-gray-500 whitespace-nowrap">هر</span>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    value={refreshIntervalSec}
+                                    onChange={(e) => setRefreshIntervalSec(parseInt(e.target.value || '5', 10))}
+                                    className="w-20 p-1.5 border rounded text-sm bg-white dir-ltr"
+                                />
+                                <span className="text-xs text-gray-500 whitespace-nowrap">ثانیه</span>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3">
+                            <label className="flex items-center gap-2 text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={useMockData}
+                                    onChange={(e) => setUseMockData(e.target.checked)}
+                                />
+                                استفاده از دیتای Mock
+                            </label>
+                            {useMockData && (
+                                <div className="grid grid-cols-3 gap-2">
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        value={mockDriversCount}
+                                        onChange={(e) => setMockDriversCount(parseInt(e.target.value || '0', 10))}
+                                        className="w-full p-1.5 border rounded text-sm bg-white dir-ltr"
+                                        title="drivers"
+                                    />
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        value={mockUsersCount}
+                                        onChange={(e) => setMockUsersCount(parseInt(e.target.value || '0', 10))}
+                                        className="w-full p-1.5 border rounded text-sm bg-white dir-ltr"
+                                        title="users"
+                                    />
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        value={mockMatchesCount}
+                                        onChange={(e) => setMockMatchesCount(parseInt(e.target.value || '0', 10))}
+                                        className="w-full p-1.5 border rounded text-sm bg-white dir-ltr"
+                                        title="matchs"
+                                    />
+                                </div>
+                            )}
+                        </div>
+
+                        <label className="flex items-center justify-between gap-3 text-sm">
+                            <span>Tooltip روی آیکون‌ها</span>
+                            <input
+                                type="checkbox"
+                                checked={showEntityTooltips}
+                                onChange={(e) => setShowEntityTooltips(e.target.checked)}
+                            />
+                        </label>
+
+                        <div className="text-xs text-slate-700 bg-white rounded border p-2 space-y-1">
+                            <div className="flex justify-between">
+                                <span>Drivers</span><span className="font-mono">{drivers.length}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span>Users</span><span className="font-mono">{users.length}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span>Matchs</span><span className="font-mono">{matchs.length}</span>
+                            </div>
+                            <div className="pt-1 border-t">
+                                <div className="text-gray-500">آخرین مچ</div>
+                                <div className="font-mono dir-ltr">
+                                    {lastMatch ? `${lastMatch.driver} -> ${lastMatch.user}` : '—'}
+                                </div>
+                            </div>
+                            {snapshotError && (
+                                <div className="text-red-600 pt-1 border-t">{snapshotError}</div>
+                            )}
+                        </div>
+                        <p className="text-[11px] text-gray-500">
+                            روی آیکون‌ها hover کنید تا JSON آن نقطه نمایش داده شود. خط نقطه‌چین = مچ‌ها، آخرین مچ قرمز است.
+                        </p>
+                    </div>
                     
                     {/* Gemini AI Section */}
                     <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
@@ -407,20 +571,12 @@ const App: React.FC = () => {
 
             {/* Map Area */}
             <div className="flex-1 relative">
-                {isLoadingTowers && (
-                    <div className="absolute top-4 left-4 z-[500] bg-white/90 border border-gray-200 shadow px-3 py-1 rounded-full text-xs text-gray-700 flex items-center gap-2">
-                        <span className="animate-spin h-3 w-3 border-2 border-blue-500 border-t-transparent rounded-full"></span>
-                        در حال بارگذاری دکل‌ها...
-                    </div>
-                )}
-                {!isLoadingTowers && towers.length === 0 && (
-                    <div className="absolute top-4 left-4 z-[500] bg-white/90 border border-gray-200 shadow px-3 py-1 rounded-full text-xs text-gray-700">
-                        در این محدوده دکلی یافت نشد
-                    </div>
-                )}
                 <MapView 
                     pins={pins}
-                    towers={towers}
+                    drivers={drivers}
+                    users={users}
+                    matchs={matchs}
+                    showEntityTooltips={showEntityTooltips}
                     circles={circles}
                     rulerState={rulerState}
                     selectedPinId={selectedPinId}
@@ -434,7 +590,6 @@ const App: React.FC = () => {
                     onDeletePin={handleDeletePin}
                     onUpdateCircle={handleUpdateCircle}
                     onDeleteCircle={handleDeleteCircle}
-                    onBoundsChange={handleBoundsChange}
                     center={mapCenter}
                 />
 

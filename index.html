@@ -27,6 +27,19 @@
          background: transparent;
          border: none;
        }
+
+       /* Match line animation (hover driver to animate its matches) */
+       @keyframes match-dash-move {
+         to { stroke-dashoffset: -24; }
+       }
+       @keyframes match-pulse {
+         0%, 100% { opacity: 0.45; }
+         50% { opacity: 1; }
+       }
+       .match-line--active {
+         stroke-dashoffset: 0;
+         animation: match-dash-move 0.8s linear infinite, match-pulse 0.9s ease-in-out infinite;
+       }
      </style>
   <script type="importmap">
 {

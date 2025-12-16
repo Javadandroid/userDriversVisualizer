@@ -58,18 +58,18 @@ export const getIconHtml = (shape: PinShape, color: string): string => {
     return '';
 };
 
-const towerIconMap: Record<string, string> = {
-    gsm: new URL('../cell_icons/2g.ico', import.meta.url).href,
-    umts: new URL('../cell_icons/3g.ico', import.meta.url).href,
-    lte: new URL('../cell_icons/4g.ico', import.meta.url).href,
-    nr: new URL('../cell_icons/5g.ico', import.meta.url).href,
+export type UserAvatarVariant = 'man' | 'girl';
+
+export const getUserIconHtml = (variant: UserAvatarVariant = 'man'): string => {
+    const iconSrc = new URL(`../icons/${variant}.ico`, import.meta.url).href;
+    return `<div style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;">
+        <img src="${iconSrc}" alt="user" style="width:24px;height:24px;object-fit:contain;" />
+    </div>`;
 };
 
-export const getTowerIconHtml = (radioType?: string): string => {
-    const normalized = radioType?.toLowerCase() ?? 'gsm';
-    const iconSrc = towerIconMap[normalized] ?? towerIconMap['gsm'];
-
+export const getDriverIconHtml = (): string => {
+    const iconSrc = new URL('../icons/car.ico', import.meta.url).href;
     return `<div style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;">
-        <img src="${iconSrc}" alt="${normalized}" style="width:24px;height:24px;object-fit:contain;" />
+        <img src="${iconSrc}" alt="driver" style="width:24px;height:24px;object-fit:contain;" />
     </div>`;
 };

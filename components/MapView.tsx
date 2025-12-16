@@ -1,14 +1,16 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 // We need to import from 'react-leaflet' but Typescript needs 'leaflet' types
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents, Polyline, useMap, Circle, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
-import { Pin, RulerState, MapCircle, LatLng, CellTowerMarker } from '../types';
-import { getIconHtml, getTowerIconHtml } from './MapIcons';
-import type { BoundingBox } from '../services/towerService';
+import { Pin, RulerState, MapCircle, LatLng, TrackedPoint, MatchPair } from '../types';
+import { getIconHtml, getDriverIconHtml, getUserIconHtml, type UserAvatarVariant } from './MapIcons';
 
 interface MapViewProps {
   pins: Pin[];
-  towers?: CellTowerMarker[];
+  drivers?: TrackedPoint[];
+  users?: TrackedPoint[];
+  matchs?: MatchPair[];
+  showEntityTooltips?: boolean;
   circles?: MapCircle[];
   drawingCircle?: { center: LatLng; radius: number; color: string } | null;
   rulerState: RulerState;
@@ -17,7 +19,6 @@ interface MapViewProps {
   onDeletePin: (id: string) => void;
   onUpdateCircle?: (id: string, newCenter: LatLng) => void;
   onDeleteCircle?: (id: string) => void;
-  onBoundsChange?: (bounds: BoundingBox, zoom: number) => void;
   center?: { lat: number; lng: number };
   selectedPinId?: string | null;
 }
@@ -26,32 +27,16 @@ interface MapViewProps {
 const MapEvents = ({ 
     onClick, 
     onMouseMove,
-    onBoundsChange,
 }: { 
     onClick: (lat: number, lng: number) => void,
     onMouseMove?: (lat: number, lng: number) => void,
-    onBoundsChange?: (bounds: BoundingBox, zoom: number) => void,
 }) => {
-  const map = useMapEvents({
+  useMapEvents({
     click(e) {
       onClick(e.latlng.lat, e.latlng.lng);
     },
     mousemove(e) {
         if (onMouseMove) onMouseMove(e.latlng.lat, e.latlng.lng);
-    },
-    moveend() {
-        if (onBoundsChange) {
-            const bounds = map.getBounds();
-            onBoundsChange(
-                {
-                    min_lat: bounds.getSouth(),
-                    max_lat: bounds.getNorth(),
-                    min_lon: bounds.getWest(),
-                    max_lon: bounds.getEast(),
-                },
-                map.getZoom()
-            );
-        }
     },
   });
   return null;
@@ -71,7 +56,10 @@ const MapFlyTo = ({ center }: { center?: { lat: number; lng: number } }) => {
 
 const MapView: React.FC<MapViewProps> = ({ 
     pins, 
-    towers = [],
+    drivers = [],
+    users = [],
+    matchs = [],
+    showEntityTooltips = true,
     circles = [], 
     drawingCircle,
     rulerState, 
@@ -80,7 +68,6 @@ const MapView: React.FC<MapViewProps> = ({
     onDeletePin, 
     onUpdateCircle,
     onDeleteCircle,
-    onBoundsChange,
     center,
     selectedPinId
   }) => {
@@ -101,6 +88,20 @@ const MapView: React.FC<MapViewProps> = ({
   
   const centerHandleIconCache = useRef<Record<string, L.DivIcon>>({});
   const markerRefs = useRef<Record<string, L.Marker | null>>({});
+  const entityIconCache = useRef<Record<string, L.DivIcon>>({});
+
+  const getEntityIcon = useCallback((kind: 'driver' | 'user', variant?: UserAvatarVariant) => {
+      const key = kind === 'user' ? `entity:user:${variant ?? 'man'}` : `entity:${kind}`;
+      if (!entityIconCache.current[key]) {
+          entityIconCache.current[key] = L.divIcon({
+              html: kind === 'driver' ? getDriverIconHtml() : getUserIconHtml(variant ?? 'man'),
+              className: kind === 'driver' ? 'driver-icon' : 'user-icon',
+              iconSize: [28, 28],
+              iconAnchor: [14, 14],
+          });
+      }
+      return entityIconCache.current[key];
+  }, []);
 
   const getCenterHandleIcon = useCallback((color: string) => {
       if (!centerHandleIconCache.current[color]) {
@@ -117,12 +118,62 @@ const MapView: React.FC<MapViewProps> = ({
           }
       }
   }, [selectedPinId]);
+
+  const driversById = useMemo(() => new Map(drivers.map(d => [d.id, d])), [drivers]);
+  const usersById = useMemo(() => new Map(users.map(u => [u.id, u])), [users]);
+
+  const lastMatch = matchs.length > 0 ? matchs[matchs.length - 1] : null;
+  const [hoveredDriverId, setHoveredDriverId] = useState<string | null>(null);
+
+  const pickUserAvatarVariant = useCallback((id: string): UserAvatarVariant => {
+      // Deterministic "random": keeps the same user icon across refreshes.
+      let hash = 0;
+      for (let i = 0; i < id.length; i++) {
+          hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+      }
+      return hash % 2 === 0 ? 'man' : 'girl';
+  }, []);
+
+  const EntityTooltip = useCallback(
+      ({ kind, point }: { kind: 'driver' | 'user'; point: TrackedPoint }) => {
+          const title = kind === 'driver' ? 'Driver' : 'User';
+          const badgeClass = kind === 'driver'
+              ? 'bg-amber-500/15 text-amber-700 border-amber-200'
+              : 'bg-sky-500/15 text-sky-700 border-sky-200';
+
+          return (
+              <div className="rounded-md border bg-white/95 shadow-sm px-2 py-1 text-[11px] text-slate-800 min-w-[160px]">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border ${badgeClass}`}>
+                          <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+                          <span className="font-semibold">{title}</span>
+                      </span>
+                      <span className="text-[10px] text-slate-500">hover</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-500">id</span>
+                      <span className="font-mono text-[10px] truncate max-w-[120px]" title={point.id}>{point.id}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-500">lat</span>
+                      <span className="font-mono text-[10px] dir-ltr">{point.lat.toFixed(5)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-500">lng</span>
+                      <span className="font-mono text-[10px] dir-ltr">{point.lng.toFixed(5)}</span>
+                  </div>
+              </div>
+          );
+      },
+      []
+  );
   
   return (
     <MapContainer
       center={[35.6892, 51.3890]} // Default to Tehran
       zoom={12}
       className="w-full h-full z-0"
+      preferCanvas
     >
       {/* Use OpenStreetMap */}
       <TileLayer
@@ -130,7 +181,7 @@ const MapView: React.FC<MapViewProps> = ({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
 
-      <MapEvents onClick={onMapClick} onMouseMove={onMapMouseMove} onBoundsChange={onBoundsChange} />
+      <MapEvents onClick={onMapClick} onMouseMove={onMapMouseMove} />
       <MapFlyTo center={center} />
 
       {/* Render Circles */}
@@ -197,38 +248,71 @@ const MapView: React.FC<MapViewProps> = ({
           />
       )}
 
-      {/* Render Cell Towers */}
-      {towers.map((tower) => {
-        const towerIcon = L.divIcon({
-            html: getTowerIconHtml(tower.radio_type),
-            className: 'tower-pin-icon',
-            iconSize: [28, 28],
-            iconAnchor: [14, 28],
-            popupAnchor: [0, -28],
-        });
-
-        return (
-            <Marker
-                key={`tower-${tower.id}`}
-                position={[tower.lat, tower.lon]}
-                icon={towerIcon}
-            >
-                <Popup>
-                    <div className="text-right text-xs space-y-1" dir="rtl">
-                        <p className="font-bold text-sm">
-                            {tower.radio_type?.toUpperCase() ?? 'UNKNOWN'} - CID: {tower.cell_id ?? 'نامشخص'}
-                        </p>
-                        <p>MCC/MNC: {tower.mcc}/{tower.mnc}</p>
-                        {tower.lac !== null && <p>LAC/TAC: {tower.lac}</p>}
-                        {tower.pci !== null && <p>PCI: {tower.pci}</p>}
-                        {tower.earfcn !== null && <p>EARFCN: {tower.earfcn}</p>}
-                        {tower.tx_power !== null && <p>TX Power: {tower.tx_power} dBm</p>}
-                        <p>Source: {tower.source}</p>
-                    </div>
-                </Popup>
-            </Marker>
-        );
+      {/* Render Match Lines (dashed) */}
+      {matchs.map((m, idx) => {
+          const d = driversById.get(m.driver);
+          const u = usersById.get(m.user);
+          if (!d || !u) return null;
+          const isLast = lastMatch?.driver === m.driver && lastMatch?.user === m.user && idx === matchs.length - 1;
+          const isActive = hoveredDriverId !== null && m.driver === hoveredDriverId;
+          return (
+              <Polyline
+                  key={`match-${idx}-${m.driver}-${m.user}`}
+                  positions={[
+                      [d.lat, d.lng],
+                      [u.lat, u.lng],
+                  ]}
+                  pathOptions={{
+                      color: isLast ? '#ef4444' : (isActive ? '#f59e0b' : '#64748b'),
+                      weight: isLast ? 3 : (isActive ? 4 : 2),
+                      dashArray: '4 8',
+                      opacity: isLast ? 0.9 : (isActive ? 0.95 : 0.6),
+                      className: `match-line${isActive ? ' match-line--active' : ''}${isLast ? ' match-line--last' : ''}`,
+                  }}
+              >
+                  <Tooltip sticky direction="top" opacity={0.9}>
+                      <div className="text-xs" dir="rtl">
+                          driver: {m.driver}<br />
+                          user: {m.user}
+                      </div>
+                  </Tooltip>
+              </Polyline>
+          );
       })}
+
+      {/* Render Drivers */}
+      {drivers.map((d) => (
+          <Marker
+              key={`driver-${d.id}`}
+              position={[d.lat, d.lng]}
+              icon={getEntityIcon('driver')}
+              eventHandlers={{
+                  mouseover: () => setHoveredDriverId(d.id),
+                  mouseout: () => setHoveredDriverId((cur) => (cur === d.id ? null : cur)),
+              }}
+          >
+              {showEntityTooltips && (
+                  <Tooltip direction="top" offset={[0, -10]} opacity={0.9}>
+                      <EntityTooltip kind="driver" point={d} />
+                  </Tooltip>
+              )}
+          </Marker>
+      ))}
+
+      {/* Render Users */}
+      {users.map((u) => (
+          <Marker
+              key={`user-${u.id}`}
+              position={[u.lat, u.lng]}
+              icon={getEntityIcon('user', pickUserAvatarVariant(u.id))}
+          >
+              {showEntityTooltips && (
+                  <Tooltip direction="top" offset={[0, -10]} opacity={0.9}>
+                      <EntityTooltip kind="user" point={u} />
+                  </Tooltip>
+              )}
+          </Marker>
+      ))}
 
       {/* Render Pins */}
       {pins.map((pin) => {
