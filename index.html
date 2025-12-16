@@ -30,7 +30,7 @@
 
        /* Match line animation (hover driver to animate its matches) */
        @keyframes match-dash-move {
-         to { stroke-dashoffset: -24; }
+         to { stroke-dashoffset: -48; }
        }
        @keyframes match-pulse {
          0%, 100% { opacity: 0.45; }
@@ -38,7 +38,15 @@
        }
        .match-line--active {
          stroke-dashoffset: 0;
-         animation: match-dash-move 0.8s linear infinite, match-pulse 0.9s ease-in-out infinite;
+         animation: match-dash-move 0.55s linear infinite, match-pulse 0.9s ease-in-out infinite;
+       }
+
+       @keyframes entity-contrast {
+         0%, 100% { filter: saturate(1) brightness(1) contrast(1); opacity: 1; }
+         50% { filter: saturate(1.35) brightness(1.25) contrast(1.2); opacity: 0.85; }
+       }
+       .entity-icon--active img {
+         animation: entity-contrast 0.9s ease-in-out infinite;
        }
      </style>
   <script type="importmap">

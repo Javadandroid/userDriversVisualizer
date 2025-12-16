@@ -90,12 +90,14 @@ const MapView: React.FC<MapViewProps> = ({
   const markerRefs = useRef<Record<string, L.Marker | null>>({});
   const entityIconCache = useRef<Record<string, L.DivIcon>>({});
 
-  const getEntityIcon = useCallback((kind: 'driver' | 'user', variant?: UserAvatarVariant) => {
-      const key = kind === 'user' ? `entity:user:${variant ?? 'man'}` : `entity:${kind}`;
+  const getEntityIcon = useCallback((kind: 'driver' | 'user', variant?: UserAvatarVariant, active?: boolean) => {
+      const key = kind === 'user'
+          ? `entity:user:${variant ?? 'man'}:${active ? 'active' : 'idle'}`
+          : `entity:driver:${active ? 'active' : 'idle'}`;
       if (!entityIconCache.current[key]) {
           entityIconCache.current[key] = L.divIcon({
               html: kind === 'driver' ? getDriverIconHtml() : getUserIconHtml(variant ?? 'man'),
-              className: kind === 'driver' ? 'driver-icon' : 'user-icon',
+              className: `entity-icon ${active ? 'entity-icon--active' : ''} ${kind === 'driver' ? 'driver-icon' : 'user-icon'}`,
               iconSize: [28, 28],
               iconAnchor: [14, 14],
           });
@@ -124,6 +126,8 @@ const MapView: React.FC<MapViewProps> = ({
 
   const lastMatch = matchs.length > 0 ? matchs[matchs.length - 1] : null;
   const [hoveredDriverId, setHoveredDriverId] = useState<string | null>(null);
+  const [hoveredUserId, setHoveredUserId] = useState<string | null>(null);
+  const [tooltipTarget, setTooltipTarget] = useState<{ kind: 'driver' | 'user'; id: string } | null>(null);
 
   const pickUserAvatarVariant = useCallback((id: string): UserAvatarVariant => {
       // Deterministic "random": keeps the same user icon across refreshes.
@@ -133,6 +137,31 @@ const MapView: React.FC<MapViewProps> = ({
       }
       return hash % 2 === 0 ? 'man' : 'girl';
   }, []);
+
+  const activeUserIds = useMemo(() => {
+      if (!hoveredDriverId) return new Set<string>();
+      const ids = new Set<string>();
+      for (const m of matchs) {
+          if (m.driver === hoveredDriverId) ids.add(m.user);
+      }
+      return ids;
+  }, [hoveredDriverId, matchs]);
+
+  const activeDriverIds = useMemo(() => {
+      if (!hoveredUserId) return new Set<string>();
+      const ids = new Set<string>();
+      for (const m of matchs) {
+          if (m.user === hoveredUserId) ids.add(m.driver);
+      }
+      return ids;
+  }, [hoveredUserId, matchs]);
+
+  useEffect(() => {
+      // When the dataset changes (refresh), ensure no tooltip/hover is left “hanging”.
+      setHoveredDriverId(null);
+      setHoveredUserId(null);
+      setTooltipTarget(null);
+  }, [drivers, users, matchs]);
 
   const EntityTooltip = useCallback(
       ({ kind, point }: { kind: 'driver' | 'user'; point: TrackedPoint }) => {
@@ -254,7 +283,9 @@ const MapView: React.FC<MapViewProps> = ({
           const u = usersById.get(m.user);
           if (!d || !u) return null;
           const isLast = lastMatch?.driver === m.driver && lastMatch?.user === m.user && idx === matchs.length - 1;
-          const isActive = hoveredDriverId !== null && m.driver === hoveredDriverId;
+          const isActive =
+              (hoveredDriverId !== null && m.driver === hoveredDriverId) ||
+              (hoveredUserId !== null && m.user === hoveredUserId);
           return (
               <Polyline
                   key={`match-${idx}-${m.driver}-${m.user}`}
@@ -262,15 +293,22 @@ const MapView: React.FC<MapViewProps> = ({
                       [d.lat, d.lng],
                       [u.lat, u.lng],
                   ]}
+                  eventHandlers={{
+                      mouseover: () => {
+                          setHoveredUserId(null);
+                          setHoveredDriverId(m.driver);
+                      },
+                      mouseout: () => setHoveredDriverId((cur) => (cur === m.driver ? null : cur)),
+                  }}
                   pathOptions={{
                       color: isLast ? '#ef4444' : (isActive ? '#f59e0b' : '#64748b'),
                       weight: isLast ? 3 : (isActive ? 4 : 2),
-                      dashArray: '4 8',
+                      dashArray: '6 10',
                       opacity: isLast ? 0.9 : (isActive ? 0.95 : 0.6),
                       className: `match-line${isActive ? ' match-line--active' : ''}${isLast ? ' match-line--last' : ''}`,
                   }}
               >
-                  <Tooltip sticky direction="top" opacity={0.9}>
+                  <Tooltip direction="top" opacity={0.9} interactive={false}>
                       <div className="text-xs" dir="rtl">
                           driver: {m.driver}<br />
                           user: {m.user}
@@ -285,16 +323,26 @@ const MapView: React.FC<MapViewProps> = ({
           <Marker
               key={`driver-${d.id}`}
               position={[d.lat, d.lng]}
-              icon={getEntityIcon('driver')}
+              icon={getEntityIcon('driver', undefined, hoveredDriverId === d.id || activeDriverIds.has(d.id))}
               eventHandlers={{
-                  mouseover: () => setHoveredDriverId(d.id),
-                  mouseout: () => setHoveredDriverId((cur) => (cur === d.id ? null : cur)),
+                  mouseover: () => {
+                      setHoveredUserId(null);
+                      setHoveredDriverId(d.id);
+                      setTooltipTarget({ kind: 'driver', id: d.id });
+                  },
+                  mouseout: () => {
+                      setHoveredDriverId((cur) => (cur === d.id ? null : cur));
+                      setTooltipTarget((cur) => (cur?.kind === 'driver' && cur.id === d.id ? null : cur));
+                  },
               }}
           >
               {showEntityTooltips && (
-                  <Tooltip direction="top" offset={[0, -10]} opacity={0.9}>
-                      <EntityTooltip kind="driver" point={d} />
-                  </Tooltip>
+                  tooltipTarget?.kind === 'driver' &&
+                  tooltipTarget.id === d.id && (
+                      <Tooltip direction="top" offset={[0, -10]} opacity={0.95} interactive={false}>
+                          <EntityTooltip kind="driver" point={d} />
+                      </Tooltip>
+                  )
               )}
           </Marker>
       ))}
@@ -304,12 +352,26 @@ const MapView: React.FC<MapViewProps> = ({
           <Marker
               key={`user-${u.id}`}
               position={[u.lat, u.lng]}
-              icon={getEntityIcon('user', pickUserAvatarVariant(u.id))}
+              icon={getEntityIcon('user', pickUserAvatarVariant(u.id), hoveredUserId === u.id || activeUserIds.has(u.id))}
+              eventHandlers={{
+                  mouseover: () => {
+                      setHoveredDriverId(null);
+                      setHoveredUserId(u.id);
+                      setTooltipTarget({ kind: 'user', id: u.id });
+                  },
+                  mouseout: () => {
+                      setHoveredUserId((cur) => (cur === u.id ? null : cur));
+                      setTooltipTarget((cur) => (cur?.kind === 'user' && cur.id === u.id ? null : cur));
+                  },
+              }}
           >
               {showEntityTooltips && (
-                  <Tooltip direction="top" offset={[0, -10]} opacity={0.9}>
-                      <EntityTooltip kind="user" point={u} />
-                  </Tooltip>
+                  tooltipTarget?.kind === 'user' &&
+                  tooltipTarget.id === u.id && (
+                      <Tooltip direction="top" offset={[0, -10]} opacity={0.95} interactive={false}>
+                          <EntityTooltip kind="user" point={u} />
+                      </Tooltip>
+                  )
               )}
           </Marker>
       ))}
