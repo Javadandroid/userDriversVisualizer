@@ -1,11 +1,10 @@
 import React, { useState, useMemo, useRef } from 'react';
 import MapView from './components/MapView';
 import { Pin, PinShape, RulerState, MapCircle, LatLng, CellTowerMarker } from './types';
-import { MapPin, Ruler, Trash2, Plus, Sparkles, Navigation, X, Circle as CircleIcon, Move } from 'lucide-react';
+import { MapPin, Ruler, Trash2, Plus, Sparkles, Navigation, X, Circle as CircleIcon } from 'lucide-react';
 import { findLocationWithAI } from './services/geminiService';
 import { MapIcon } from './components/MapIcons';
 import { fetchTowersByBounds, type BoundingBox } from './services/towerService';
-import ImportTowers from './components/ImportTowers';
 
 // Helper to calculate distance
 const calculateDistance = (p1: { lat: number; lng: number }, p2: { lat: number; lng: number }) => {
@@ -66,7 +65,6 @@ const App: React.FC = () => {
     const [towers, setTowers] = useState<CellTowerMarker[]>([]);
     const [isLoadingTowers, setIsLoadingTowers] = useState(false);
     const fetchTimeoutRef = useRef<number | null>(null);
-    const [showImportPanel, setShowImportPanel] = useState(false);
 
     // -- Handlers --
 
@@ -409,19 +407,6 @@ const App: React.FC = () => {
 
             {/* Map Area */}
             <div className="flex-1 relative">
-                <div className="absolute top-4 left-4 z-[600] flex gap-2">
-                    <button
-                        onClick={() => setShowImportPanel(!showImportPanel)}
-                        className="bg-cyan-400 text-slate-900 font-bold px-3 py-2 rounded-lg shadow hover:scale-[1.02] transition"
-                    >
-                        {showImportPanel ? 'بستن ایمپورت' : 'ایمپورت CSV'}
-                    </button>
-                </div>
-                {showImportPanel && (
-                    <div className="absolute top-14 left-4 right-4 z-[550] max-h-[80vh] overflow-auto">
-                        <ImportTowers />
-                    </div>
-                )}
                 {isLoadingTowers && (
                     <div className="absolute top-4 left-4 z-[500] bg-white/90 border border-gray-200 shadow px-3 py-1 rounded-full text-xs text-gray-700 flex items-center gap-2">
                         <span className="animate-spin h-3 w-3 border-2 border-blue-500 border-t-transparent rounded-full"></span>
