@@ -399,15 +399,15 @@ const MapView: React.FC<MapViewProps> = ({
             eventHandlers={{
               click: (e) => {
                 if (rulerState.isActive) {
-                  // جلوگیری از انتشار کلیک به نقشه (برای جلوگیری از ثبت نقطه تکراری یا نادقیق)
+                  // Prevent click propagation to the map (avoids duplicate / imprecise ruler points)
                   L.DomEvent.stopPropagation(e.originalEvent);
-                  // استفاده از مختصات دقیق پین برای خط‌کش
+                  // Use the pin's exact coordinates for the ruler
                   onMapClick(pin.position.lat, pin.position.lng);
                 }
               }
             }}
           >
-            {/* اگر خط‌کش فعال است، پاپ‌آپ را رندر نکن تا مزاحم نشود */}
+            {/* If the ruler is active, don't render the popup to avoid interference */}
             {!rulerState.isActive && (
               <Popup>
                 <div className="text-right" dir="rtl">
