@@ -53,6 +53,18 @@ const MapFlyTo = ({ center }: { center?: { lat: number; lng: number } }) => {
   }, [center, map]);
   return null;
 };
+const MapEnsureSize = () => {
+  const map = useMap();
+  useEffect(() => {
+    const t0 = window.setTimeout(() => map.invalidateSize(), 0);
+    const t1 = window.setTimeout(() => map.invalidateSize(), 250);
+    return () => {
+      window.clearTimeout(t0);
+      window.clearTimeout(t1);
+    };
+  }, [map]);
+  return null;
+};
 
 const MapView: React.FC<MapViewProps> = ({ 
     pins, 
@@ -210,6 +222,7 @@ const MapView: React.FC<MapViewProps> = ({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
 
+      <MapEnsureSize />
       <MapEvents onClick={onMapClick} onMouseMove={onMapMouseMove} />
       <MapFlyTo center={center} />
 
