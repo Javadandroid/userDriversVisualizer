@@ -140,6 +140,8 @@ const MapView: React.FC<MapViewProps> = ({
   const [hoveredDriverId, setHoveredDriverId] = useState<string | null>(null);
   const [hoveredUserId, setHoveredUserId] = useState<string | null>(null);
   const [tooltipTarget, setTooltipTarget] = useState<{ kind: 'driver' | 'user'; id: string } | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<number | null>(null);
 
   const pickUserAvatarVariant = useCallback((id: string): UserAvatarVariant => {
       // Deterministic "random": keeps the same user icon across refreshes.
@@ -148,6 +150,56 @@ const MapView: React.FC<MapViewProps> = ({
           hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
       }
       return hash % 2 === 0 ? 'man' : 'girl';
+  }, []);
+
+  const formatEntityForClipboard = useCallback((kind: 'driver' | 'user', point: TrackedPoint) => {
+      const label = kind === 'driver' ? 'driver' : 'user';
+      return `${label}: ${point.id}\nlat: ${point.lat}\nlng: ${point.lng}`;
+  }, []);
+
+  const copyTextToClipboard = useCallback(async (text: string) => {
+      try {
+          if (navigator.clipboard?.writeText) {
+              await navigator.clipboard.writeText(text);
+              return true;
+          }
+      } catch {
+          // ignore and fallback
+      }
+
+      try {
+          const el = document.createElement('textarea');
+          el.value = text;
+          el.setAttribute('readonly', 'true');
+          el.style.position = 'fixed';
+          el.style.left = '-9999px';
+          document.body.appendChild(el);
+          el.select();
+          const ok = document.execCommand('copy');
+          document.body.removeChild(el);
+          return ok;
+      } catch {
+          return false;
+      }
+  }, []);
+
+  useEffect(() => {
+      return () => {
+          if (toastTimeoutRef.current !== null) {
+              window.clearTimeout(toastTimeoutRef.current);
+          }
+      };
+  }, []);
+
+  const showToast = useCallback((message: string) => {
+      setToastMessage(message);
+      if (toastTimeoutRef.current !== null) {
+          window.clearTimeout(toastTimeoutRef.current);
+      }
+      toastTimeoutRef.current = window.setTimeout(() => {
+          setToastMessage(null);
+          toastTimeoutRef.current = null;
+      }, 1000);
   }, []);
 
   const activeUserIds = useMemo(() => {
@@ -213,7 +265,7 @@ const MapView: React.FC<MapViewProps> = ({
     <MapContainer
       center={[35.6892, 51.3890]} // Default to Tehran
       zoom={12}
-      className="w-full h-full z-0"
+      className="w-full h-full z-0 relative"
       preferCanvas
     >
       {/* Use OpenStreetMap */}
@@ -225,6 +277,14 @@ const MapView: React.FC<MapViewProps> = ({
       <MapEnsureSize />
       <MapEvents onClick={onMapClick} onMouseMove={onMapMouseMove} />
       <MapFlyTo center={center} />
+
+      {toastMessage && (
+          <div className="absolute top-3 right-3 z-[1000] pointer-events-none">
+              <div className="bg-slate-900/90 text-white text-xs px-3 py-2 rounded shadow-md" dir="rtl">
+                  {toastMessage}
+              </div>
+          </div>
+      )}
 
       {/* Render Circles */}
       {circles.map(circle => (
@@ -314,10 +374,10 @@ const MapView: React.FC<MapViewProps> = ({
                       mouseout: () => setHoveredDriverId((cur) => (cur === m.driver ? null : cur)),
                   }}
                   pathOptions={{
-                      color: isLast ? '#ef4444' : (isActive ? '#f59e0b' : '#64748b'),
-                      weight: isLast ? 3 : (isActive ? 4 : 2),
+                      color: isLast ? '#ef4444' : (isActive ? '#f59e0b' : '#ff00bfff'),
+                      weight: isLast ? 3 : (isActive ? 6 : 4),
                       dashArray: '6 10',
-                      opacity: isLast ? 0.9 : (isActive ? 0.95 : 0.6),
+                      opacity: isLast ? 0.9 : (isActive ? 0.95 : 0.8),
                       className: `match-line${isActive ? ' match-line--active' : ''}${isLast ? ' match-line--last' : ''}`,
                   }}
               >
@@ -338,6 +398,11 @@ const MapView: React.FC<MapViewProps> = ({
               position={[d.lat, d.lng]}
               icon={getEntityIcon('driver', undefined, hoveredDriverId === d.id || activeDriverIds.has(d.id))}
               eventHandlers={{
+                  click: async (e) => {
+                      if (e?.originalEvent) L.DomEvent.stopPropagation(e.originalEvent);
+                      const ok = await copyTextToClipboard(formatEntityForClipboard('driver', d));
+                      showToast(ok ? 'کپی شد' : 'کپی ناموفق بود');
+                  },
                   mouseover: () => {
                       setHoveredUserId(null);
                       setHoveredDriverId(d.id);
@@ -361,12 +426,18 @@ const MapView: React.FC<MapViewProps> = ({
       ))}
 
       {/* Render Users */}
+      {/* {Array.from(usersById.values()).map((u) => ( */}
       {users.map((u) => (
           <Marker
               key={`user-${u.id}`}
               position={[u.lat, u.lng]}
               icon={getEntityIcon('user', pickUserAvatarVariant(u.id), hoveredUserId === u.id || activeUserIds.has(u.id))}
               eventHandlers={{
+                  click: async (e) => {
+                      if (e?.originalEvent) L.DomEvent.stopPropagation(e.originalEvent);
+                      const ok = await copyTextToClipboard(formatEntityForClipboard('user', u));
+                      showToast(ok ? 'کپی شد' : 'کپی ناموفق بود');
+                  },
                   mouseover: () => {
                       setHoveredDriverId(null);
                       setHoveredUserId(u.id);
