@@ -22,6 +22,53 @@ const calculateDistance = (p1: { lat: number; lng: number }, p2: { lat: number; 
     return R * c; // in meters
 };
 
+const hashString = (value: string) => {
+    let hash = 2166136261;
+    for (let i = 0; i < value.length; i++) {
+        hash ^= value.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+};
+
+const pseudoCoordFromId = (id: string, salt: string) => {
+    // Tehran-ish bounds, deterministic by id for stable placement across refreshes.
+    const minLat = 35.62;
+    const maxLat = 35.82;
+    const minLng = 51.20;
+    const maxLng = 51.55;
+    const h1 = hashString(`${salt}:${id}`);
+    const h2 = hashString(`${id}:${salt}`);
+    const lat = minLat + (h1 % 10000) / 10000 * (maxLat - minLat);
+    const lng = minLng + (h2 % 10000) / 10000 * (maxLng - minLng);
+    return { lat, lng };
+};
+
+const withOrphanEntities = (
+    drivers: TrackedPoint[],
+    users: TrackedPoint[],
+    matchs: MatchPair[]
+) => {
+    const driversById = new Map(drivers.map((d) => [d.id, d]));
+    const usersById = new Map(users.map((u) => [u.id, u]));
+
+    for (const m of matchs) {
+        if (!driversById.has(m.driver)) {
+            const { lat, lng } = pseudoCoordFromId(m.driver, 'driver');
+            driversById.set(m.driver, { id: m.driver, lat, lng });
+        }
+        if (!usersById.has(m.user)) {
+            const { lat, lng } = pseudoCoordFromId(m.user, 'user');
+            usersById.set(m.user, { id: m.user, lat, lng });
+        }
+    }
+
+    return {
+        drivers: Array.from(driversById.values()),
+        users: Array.from(usersById.values()),
+    };
+};
+
 const App: React.FC = () => {
     // -- State --
     const [pins, setPins] = useState<Pin[]>([]);
@@ -259,8 +306,9 @@ const App: React.FC = () => {
                 })
                 : await fetchMatchSnapshot({ endpoint: snapshotEndpoint }, controller.signal);
 
-            setDrivers(data.drivers);
-            setUsers(data.users);
+            const hydrated = withOrphanEntities(data.drivers, data.users, data.matchs);
+            setDrivers(hydrated.drivers);
+            setUsers(hydrated.users);
             setMatchs(data.matchs);
         } catch (e: any) {
             clearSnapshot();
